@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 function useRingtone() {
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -71,6 +71,7 @@ interface CallUIProps {
   remoteStreams: Map<number, MediaStream>;
   micMuted: boolean;
   camOff: boolean;
+  roomName?: string;
   onAccept: () => void;
   onReject: () => void;
   onEnd: () => void;
@@ -80,35 +81,57 @@ interface CallUIProps {
 
 function VideoTile({ stream, muted, label }: { stream: MediaStream | null; muted: boolean; label: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [hasVideo, setHasVideo] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const el = videoRef.current;
+    if (el && stream) {
+      el.srcObject = stream;
+      // Play may fail without user interaction
+      el.play().catch(() => {});
+    }
+
+    // Check video tracks immediately and on changes
+    const checkVideo = () => {
+      const tracks = stream?.getVideoTracks() || [];
+      setHasVideo(tracks.length > 0 && tracks.some(t => t.readyState === "live"));
+    };
+    checkVideo();
+
+    // Listen for track additions/removals
+    if (stream) {
+      stream.addEventListener("addtrack", checkVideo);
+      stream.addEventListener("removetrack", checkVideo);
+      // Check periodically for track state changes
+      const interval = setInterval(checkVideo, 1000);
+      return () => {
+        stream.removeEventListener("addtrack", checkVideo);
+        stream.removeEventListener("removetrack", checkVideo);
+        clearInterval(interval);
+      };
     }
   }, [stream]);
 
-  const hasVideo = stream && stream.getVideoTracks().length > 0 && stream.getVideoTracks().some(t => t.enabled);
-
   return (
     <div className="relative bg-surface-800 rounded-2xl overflow-hidden aspect-video">
-      {hasVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={muted}
-          className="w-full h-full object-cover"
-        />
-      ) : (
+      {/* Always render video element — hide if no video tracks */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={muted}
+        className={`w-full h-full object-cover ${hasVideo ? "block" : "hidden"}`}
+      />
+      {!hasVideo && (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-800 to-surface-900">
           <div className="w-20 h-20 rounded-2xl bg-brand-600/20 flex items-center justify-center text-brand-400 text-3xl font-bold">
             {label[0]?.toUpperCase() || "?"}
           </div>
-          {/* Still play audio even without video */}
-          {stream && (
-            <audio ref={(el) => { if (el) el.srcObject = stream; }} autoPlay muted={muted} className="hidden" />
-          )}
         </div>
+      )}
+      {/* Hidden audio for audio-only streams */}
+      {stream && !hasVideo && (
+        <audio ref={(el) => { if (el) el.srcObject = stream; }} autoPlay muted={muted} className="hidden" />
       )}
       <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-lg font-medium">
         {label}
@@ -123,13 +146,15 @@ export default function CallUI({
   remoteStreams,
   micMuted,
   camOff,
+  roomName,
   onAccept,
   onReject,
   onEnd,
   onToggleMic,
   onToggleCam,
 }: CallUIProps) {
-  const callerName = callState.fromUserName || "Someone";
+  const callerName = callState.fromUserName || roomName || "Someone";
+  const remoteName = callState.fromUserName || roomName || "Remote";
   const ringtone = useRingtone();
 
   // Play ringtone for incoming calls
@@ -223,7 +248,7 @@ export default function CallUI({
       }}>
         <VideoTile stream={localStream} muted={true} label="You" />
         {Array.from(remoteStreams.entries()).map(([userId, stream]) => (
-          <VideoTile key={userId} stream={stream} muted={false} label={callState.fromUserName || `User ${userId}`} />
+          <VideoTile key={userId} stream={stream} muted={false} label={remoteName} />
         ))}
       </div>
 

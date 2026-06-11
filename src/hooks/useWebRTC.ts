@@ -286,9 +286,11 @@ export function useWebRTC() {
       }),
 
       subscribe("call_accept", (payload) => {
-        // Someone accepted our call — they will send us a WebRTC offer
-        // We need to have our local stream ready for when the offer arrives
-        // The stream should already be set from startCall
+        // Someone accepted our call — capture their name
+        const acceptorName = payload.from_user_name as string | undefined;
+        if (acceptorName) {
+          setCallState((prev) => ({ ...prev, fromUserName: acceptorName }));
+        }
       }),
 
       subscribe("call_reject", () => {

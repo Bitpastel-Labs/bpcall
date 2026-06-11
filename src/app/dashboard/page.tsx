@@ -239,6 +239,7 @@ function DashboardContent() {
         remoteStreams={remoteStreams}
         micMuted={micMuted}
         camOff={camOff}
+        roomName={roomName}
         onAccept={acceptCall}
         onReject={rejectCall}
         onEnd={endCall}
