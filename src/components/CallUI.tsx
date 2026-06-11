@@ -69,6 +69,7 @@ interface CallUIProps {
   };
   localStream: MediaStream | null;
   remoteStreams: Map<number, MediaStream>;
+  remoteNames: Map<number, string>;
   micMuted: boolean;
   camOff: boolean;
   roomName?: string;
@@ -79,7 +80,14 @@ interface CallUIProps {
   onToggleCam: () => void;
 }
 
-function VideoTile({ stream, muted, label }: { stream: MediaStream | null; muted: boolean; label: string }) {
+function VideoTile({
+  stream, muted, label, size = "full",
+}: {
+  stream: MediaStream | null;
+  muted: boolean;
+  label: string;
+  size?: "full" | "pip";
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hasVideo, setHasVideo] = useState(false);
 
@@ -87,22 +95,18 @@ function VideoTile({ stream, muted, label }: { stream: MediaStream | null; muted
     const el = videoRef.current;
     if (el && stream) {
       el.srcObject = stream;
-      // Play may fail without user interaction
       el.play().catch(() => {});
     }
 
-    // Check video tracks immediately and on changes
     const checkVideo = () => {
       const tracks = stream?.getVideoTracks() || [];
       setHasVideo(tracks.length > 0 && tracks.some(t => t.readyState === "live"));
     };
     checkVideo();
 
-    // Listen for track additions/removals
     if (stream) {
       stream.addEventListener("addtrack", checkVideo);
       stream.addEventListener("removetrack", checkVideo);
-      // Check periodically for track state changes
       const interval = setInterval(checkVideo, 1000);
       return () => {
         stream.removeEventListener("addtrack", checkVideo);
@@ -112,9 +116,14 @@ function VideoTile({ stream, muted, label }: { stream: MediaStream | null; muted
     }
   }, [stream]);
 
+  const isPip = size === "pip";
+
   return (
-    <div className="relative bg-surface-800 rounded-2xl overflow-hidden aspect-video">
-      {/* Always render video element — hide if no video tracks */}
+    <div className={`relative overflow-hidden ${
+      isPip
+        ? "w-28 h-40 sm:w-36 sm:h-48 rounded-xl shadow-2xl shadow-black/50 border border-white/[0.1]"
+        : "w-full h-full rounded-2xl"
+    } bg-surface-800`}>
       <video
         ref={videoRef}
         autoPlay
@@ -124,16 +133,19 @@ function VideoTile({ stream, muted, label }: { stream: MediaStream | null; muted
       />
       {!hasVideo && (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-surface-800 to-surface-900">
-          <div className="w-20 h-20 rounded-2xl bg-brand-600/20 flex items-center justify-center text-brand-400 text-3xl font-bold">
+          <div className={`rounded-2xl bg-brand-600/20 flex items-center justify-center text-brand-400 font-bold ${
+            isPip ? "w-12 h-12 text-xl" : "w-24 h-24 text-4xl"
+          }`}>
             {label[0]?.toUpperCase() || "?"}
           </div>
         </div>
       )}
-      {/* Hidden audio for audio-only streams */}
       {stream && !hasVideo && (
         <audio ref={(el) => { if (el) el.srcObject = stream; }} autoPlay muted={muted} className="hidden" />
       )}
-      <div className="absolute bottom-3 left-3 bg-black/60 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-lg font-medium">
+      <div className={`absolute bg-black/60 backdrop-blur-sm text-white font-medium ${
+        isPip ? "bottom-2 left-2 text-[10px] px-2 py-1 rounded-md" : "bottom-3 left-3 text-xs px-3 py-1.5 rounded-lg"
+      }`}>
         {label}
       </div>
     </div>
@@ -144,6 +156,7 @@ export default function CallUI({
   callState,
   localStream,
   remoteStreams,
+  remoteNames,
   micMuted,
   camOff,
   roomName,
@@ -153,8 +166,12 @@ export default function CallUI({
   onToggleMic,
   onToggleCam,
 }: CallUIProps) {
-  const callerName = callState.fromUserName || roomName || "Someone";
-  const remoteName = callState.fromUserName || roomName || "Remote";
+  // For incoming calls: fromUserName is the caller's name (from call_initiate)
+  // For outgoing calls: fromUserName is the acceptor's name (from call_accept), fallback to roomName
+  const callerName = callState.fromUserName || "Someone";
+  const remoteName = callState.incoming
+    ? (callState.fromUserName || "Remote")
+    : (callState.fromUserName || roomName || "Remote");
   const ringtone = useRingtone();
 
   // Play ringtone for incoming calls
@@ -237,23 +254,53 @@ export default function CallUI({
     <div className="fixed inset-0 bg-surface-950 z-[90] flex flex-col">
       {/* Error banner */}
       {callState.error && (
-        <div className="bg-amber-500/15 border-b border-amber-500/20 px-4 py-2 text-center">
+        <div className="bg-amber-500/15 border-b border-amber-500/20 px-4 py-2 text-center shrink-0">
           <p className="text-xs text-amber-400">{callState.error}</p>
         </div>
       )}
 
-      {/* Video grid */}
-      <div className="flex-1 p-4 grid gap-4 auto-rows-fr" style={{
-        gridTemplateColumns: `repeat(${Math.min(remoteStreams.size + 1, 2)}, 1fr)`,
-      }}>
-        <VideoTile stream={localStream} muted={true} label="You" />
-        {Array.from(remoteStreams.entries()).map(([userId, stream]) => (
-          <VideoTile key={userId} stream={stream} muted={false} label={remoteName} />
-        ))}
-      </div>
+      {/* Video area */}
+      {remoteStreams.size <= 1 ? (
+        /* 1:1 call — Google Meet style: remote full screen, self as PIP */
+        <div className="flex-1 min-h-0 relative">
+          {remoteStreams.size === 1 ? (
+            <div className="absolute inset-0">
+              {Array.from(remoteStreams.entries()).map(([userId, stream]) => {
+                const name = remoteNames.get(userId) || remoteName;
+                return <VideoTile key={userId} stream={stream} muted={false} label={name} size="full" />;
+              })}
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-surface-900 to-surface-950">
+              <div className="w-24 h-24 rounded-2xl bg-brand-600/20 flex items-center justify-center text-brand-400 text-4xl font-bold mb-4">
+                {remoteName[0]?.toUpperCase() || "?"}
+              </div>
+              <p className="text-white text-lg font-semibold">{remoteName}</p>
+              <p className="text-surface-200/40 text-sm mt-1">Connecting...</p>
+            </div>
+          )}
+          {/* Self as picture-in-picture overlay */}
+          <div className="absolute top-4 right-4 z-10">
+            <VideoTile stream={localStream} muted={true} label="You" size="pip" />
+          </div>
+        </div>
+      ) : (
+        /* Group call — grid layout like Google Meet */
+        <div className="flex-1 min-h-0 p-4 flex items-center justify-center">
+          <div className="w-full h-full grid gap-3 auto-rows-fr" style={{
+            gridTemplateColumns: `repeat(${Math.min(remoteStreams.size + 1, 3)}, 1fr)`,
+          }}>
+            <VideoTile stream={localStream} muted={true} label="You" />
+            {Array.from(remoteStreams.entries()).map(([userId, stream]) => {
+              const name = remoteNames.get(userId) || remoteName;
+              return <VideoTile key={userId} stream={stream} muted={false} label={name} />;
+            })}
+          </div>
+        </div>
+      )}
 
-      {/* Controls */}
-      <div className="flex items-center justify-center gap-4 p-6 bg-surface-900/50 backdrop-blur-sm">
+      {/* Controls — always visible at bottom */}
+      <div className="flex items-center justify-center gap-4 p-6 bg-surface-900/50 backdrop-blur-sm shrink-0">
         <button
           onClick={onToggleMic}
           className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${

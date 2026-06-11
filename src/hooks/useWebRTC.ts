@@ -35,6 +35,7 @@ export function useWebRTC() {
   });
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<number, MediaStream>>(new Map());
+  const [remoteNames, setRemoteNames] = useState<Map<number, string>>(new Map());
   const [micMuted, setMicMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
 
@@ -53,6 +54,7 @@ export function useWebRTC() {
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
     setRemoteStreams(new Map());
+    setRemoteNames(new Map());
     setCallState({
       active: false,
       roomId: null,
@@ -235,33 +237,41 @@ export function useWebRTC() {
     if (!stream) return;
 
     const videoTracks = stream.getVideoTracks();
-    if (videoTracks.length > 0 && videoTracks[0].enabled) {
-      // Turn off camera — stop track and remove
-      videoTracks.forEach((t) => {
-        t.stop();
-        stream.removeTrack(t);
-      });
-      // Notify peers we removed video
+
+    if (videoTracks.length > 0 && videoTracks[0].readyState === "live") {
+      // Turn off camera — stop the track, replace with null on peers
+      videoTracks.forEach((t) => t.stop());
       peersRef.current.forEach((pc) => {
-        const senders = pc.getSenders();
-        senders.forEach((s) => {
+        pc.getSenders().forEach((s) => {
           if (s.track?.kind === "video") {
-            pc.removeTrack(s);
+            s.replaceTrack(null);
           }
         });
       });
       setCamOff(true);
+      setLocalStream(new MediaStream(stream.getAudioTracks()));
     } else {
-      // Turn on camera — acquire new video track
+      // Turn on camera — get new track, replace on peers
       try {
         const newStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const videoTrack = newStream.getVideoTracks()[0];
-        stream.addTrack(videoTrack);
-        // Add to all peer connections
+        const newTrack = newStream.getVideoTracks()[0];
+
+        // Add to local stream
+        stream.getVideoTracks().forEach((t) => stream.removeTrack(t));
+        stream.addTrack(newTrack);
+
+        // Replace on all peer connections
         peersRef.current.forEach((pc) => {
-          pc.addTrack(videoTrack, stream);
+          const videoSender = pc.getSenders().find((s) => s.track === null || s.track?.kind === "video");
+          if (videoSender) {
+            videoSender.replaceTrack(newTrack);
+          } else {
+            pc.addTrack(newTrack, stream);
+          }
         });
-        setLocalStream(new MediaStream(stream.getTracks())); // trigger re-render
+
+        localStreamRef.current = stream;
+        setLocalStream(new MediaStream(stream.getTracks()));
         setCamOff(false);
       } catch {
         setCallState((prev) => ({ ...prev, error: "Camera unavailable" }));
@@ -273,23 +283,32 @@ export function useWebRTC() {
     const unsubs = [
       subscribe("call_initiate", (payload) => {
         if (callStateRef.current.active) return;
+        const callerId = payload.from_user_id as number;
+        const callerName = (payload.from_user_name as string) || null;
         setCallState({
           active: false,
           roomId: payload.room_id as number,
           callType: payload.call_type as "audio" | "video",
           callLogId: payload.call_log_id as number,
           incoming: true,
-          fromUserId: payload.from_user_id as number,
-          fromUserName: (payload.from_user_name as string) || null,
+          fromUserId: callerId,
+          fromUserName: callerName,
           error: null,
         });
+        if (callerId && callerName) {
+          setRemoteNames((prev) => new Map(prev).set(callerId, callerName));
+        }
       }),
 
       subscribe("call_accept", (payload) => {
         // Someone accepted our call — capture their name
         const acceptorName = payload.from_user_name as string | undefined;
+        const acceptorId = payload.from_user_id as number | undefined;
         if (acceptorName) {
           setCallState((prev) => ({ ...prev, fromUserName: acceptorName }));
+        }
+        if (acceptorId && acceptorName) {
+          setRemoteNames((prev) => new Map(prev).set(acceptorId, acceptorName));
         }
       }),
 
@@ -368,6 +387,7 @@ export function useWebRTC() {
     callState,
     localStream,
     remoteStreams,
+    remoteNames,
     micMuted,
     camOff,
     startCall,

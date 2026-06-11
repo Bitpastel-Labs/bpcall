@@ -45,6 +45,7 @@ function DashboardContent() {
     callState,
     localStream,
     remoteStreams,
+    remoteNames,
     micMuted,
     camOff,
     startCall,
@@ -237,6 +238,7 @@ function DashboardContent() {
         callState={callState}
         localStream={localStream}
         remoteStreams={remoteStreams}
+        remoteNames={remoteNames}
         micMuted={micMuted}
         camOff={camOff}
         roomName={roomName}
