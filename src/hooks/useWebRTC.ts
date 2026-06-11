@@ -310,11 +310,12 @@ export function useWebRTC() {
           setRemoteNames((prev) => new Map(prev).set(acceptorId, acceptorName));
         }
 
-        // In a group call, if we're already active and someone else joins,
-        // we need to create a peer connection with them too (mesh P2P)
+        // For group calls: if we already have at least one peer connection
+        // (meaning we're already connected to someone), and a NEW person joins,
+        // we initiate a connection to them. The first person to accept will send
+        // us an offer directly (from acceptCall), so we don't send one here.
         if (callStateRef.current.active && acceptorId && localStreamRef.current) {
-          // Only if we don't already have a connection to this user
-          if (!peersRef.current.has(acceptorId)) {
+          if (peersRef.current.size > 0 && !peersRef.current.has(acceptorId)) {
             try {
               const pc = createPeerConnection(acceptorId, localStreamRef.current);
               const offer = await pc.createOffer();
