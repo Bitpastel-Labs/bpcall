@@ -164,4 +164,7 @@ export const api = {
 
   changeRole: (roomId: number, userId: number) =>
     request<void>(`/api/rooms/${roomId}/members/${userId}/role`, { method: "PUT" }),
+
+  getRoomMembers: (roomId: number) =>
+    request<import("@/types").Room>(`/api/rooms/${roomId}`),
 };

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -176,8 +177,8 @@ export function useWebRTC() {
   );
 
   const acceptCall = useCallback(async () => {
-    const { roomId, callType, fromUserId, callLogId } = callStateRef.current;
-    if (!roomId || !callType || !fromUserId) return;
+    const { roomId, callType, callLogId } = callStateRef.current;
+    if (!roomId || !callType) return;
 
     try {
       const stream = await getMedia(callType);
@@ -188,24 +189,52 @@ export function useWebRTC() {
         payload: { room_id: roomId, call_log_id: callLogId },
       });
 
-      // Create peer connection and send offer to the caller
-      const pc = createPeerConnection(fromUserId, stream);
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      send({
-        type: "webrtc_offer",
-        payload: {
-          target_user_id: fromUserId,
-          sdp: offer.sdp,
-          type: offer.type,
-          room_id: roomId,
-        },
-      });
+      // Fetch room members and send offers to ALL other members
+      // This handles both 1:1 (offer to caller) and group (offer to everyone)
+      try {
+        const room = await api.getRoom(roomId);
+        for (const member of room.members) {
+          if (member.user.id === user?.id) continue; // skip self
+          const pc = createPeerConnection(member.user.id, stream);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          send({
+            type: "webrtc_offer",
+            payload: {
+              target_user_id: member.user.id,
+              sdp: offer.sdp,
+              type: offer.type,
+              room_id: roomId,
+            },
+          });
+          // Store their name
+          setRemoteNames((prev) => new Map(prev).set(
+            member.user.id,
+            member.user.display_name || member.user.username
+          ));
+        }
+      } catch {
+        // Fallback: if room fetch fails, just offer to the caller
+        const fromUserId = callStateRef.current.fromUserId;
+        if (fromUserId) {
+          const pc = createPeerConnection(fromUserId, stream);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          send({
+            type: "webrtc_offer",
+            payload: {
+              target_user_id: fromUserId,
+              sdp: offer.sdp,
+              type: offer.type,
+              room_id: roomId,
+            },
+          });
+        }
+      }
     } catch {
-      // getMedia already set the error, but don't leave the call hanging
       cleanup();
     }
-  }, [getMedia, send, createPeerConnection, cleanup]);
+  }, [getMedia, send, createPeerConnection, cleanup, user?.id]);
 
   const rejectCall = useCallback(() => {
     const { roomId, callLogId } = callStateRef.current;
@@ -310,30 +339,8 @@ export function useWebRTC() {
           setRemoteNames((prev) => new Map(prev).set(acceptorId, acceptorName));
         }
 
-        // For group calls: if we already have at least one peer connection
-        // (meaning we're already connected to someone), and a NEW person joins,
-        // we initiate a connection to them. The first person to accept will send
-        // us an offer directly (from acceptCall), so we don't send one here.
-        if (callStateRef.current.active && acceptorId && localStreamRef.current) {
-          if (peersRef.current.size > 0 && !peersRef.current.has(acceptorId)) {
-            try {
-              const pc = createPeerConnection(acceptorId, localStreamRef.current);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              send({
-                type: "webrtc_offer",
-                payload: {
-                  target_user_id: acceptorId,
-                  sdp: offer.sdp,
-                  type: offer.type,
-                  room_id: callStateRef.current.roomId,
-                },
-              });
-            } catch (e) {
-              console.error("[WebRTC] Error connecting to new participant:", e);
-            }
-          }
-        }
+        // The joiner (acceptCall) sends offers to all existing participants.
+        // So existing participants just wait — no action needed here.
       }),
 
       subscribe("call_reject", () => {

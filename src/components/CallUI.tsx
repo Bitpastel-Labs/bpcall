@@ -12,27 +12,80 @@ function useRingtone() {
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
 
-      const playTone = () => {
-        // Two-tone ring: high then low
+      const playRing = () => {
         const now = ctx.currentTime;
-        [0, 0.2].forEach((offset, i) => {
+
+        // Melodic three-note ascending chime (C5 → E5 → G5)
+        const notes = [
+          { freq: 523.25, start: 0, dur: 0.18 },     // C5
+          { freq: 659.25, start: 0.15, dur: 0.18 },   // E5
+          { freq: 783.99, start: 0.30, dur: 0.35 },   // G5 (held longer)
+        ];
+
+        notes.forEach(({ freq, start: s, dur }) => {
+          // Main tone
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
           osc.connect(gain);
           gain.connect(ctx.destination);
-          osc.frequency.value = i === 0 ? 440 : 350;
+          osc.frequency.value = freq;
           osc.type = "sine";
-          gain.gain.setValueAtTime(0, now + offset);
-          gain.gain.linearRampToValueAtTime(0.15, now + offset + 0.05);
-          gain.gain.setValueAtTime(0.15, now + offset + 0.15);
-          gain.gain.linearRampToValueAtTime(0, now + offset + 0.2);
-          osc.start(now + offset);
-          osc.stop(now + offset + 0.25);
+          // Smooth envelope
+          gain.gain.setValueAtTime(0, now + s);
+          gain.gain.linearRampToValueAtTime(0.12, now + s + 0.03);
+          gain.gain.setValueAtTime(0.12, now + s + dur - 0.08);
+          gain.gain.linearRampToValueAtTime(0, now + s + dur);
+          osc.start(now + s);
+          osc.stop(now + s + dur + 0.01);
+
+          // Soft harmonic overtone for richness
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.frequency.value = freq * 2; // octave up
+          osc2.type = "sine";
+          gain2.gain.setValueAtTime(0, now + s);
+          gain2.gain.linearRampToValueAtTime(0.03, now + s + 0.03);
+          gain2.gain.setValueAtTime(0.03, now + s + dur - 0.08);
+          gain2.gain.linearRampToValueAtTime(0, now + s + dur);
+          osc2.start(now + s);
+          osc2.stop(now + s + dur + 0.01);
+        });
+
+        // Repeat the chime after a pause (second ring)
+        const secondStart = 0.9;
+        notes.forEach(({ freq, start: s, dur }) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.value = freq;
+          osc.type = "sine";
+          gain.gain.setValueAtTime(0, now + secondStart + s);
+          gain.gain.linearRampToValueAtTime(0.10, now + secondStart + s + 0.03);
+          gain.gain.setValueAtTime(0.10, now + secondStart + s + dur - 0.08);
+          gain.gain.linearRampToValueAtTime(0, now + secondStart + s + dur);
+          osc.start(now + secondStart + s);
+          osc.stop(now + secondStart + s + dur + 0.01);
+
+          const osc2 = ctx.createOscillator();
+          const gain2 = ctx.createGain();
+          osc2.connect(gain2);
+          gain2.connect(ctx.destination);
+          osc2.frequency.value = freq * 2;
+          osc2.type = "sine";
+          gain2.gain.setValueAtTime(0, now + secondStart + s);
+          gain2.gain.linearRampToValueAtTime(0.025, now + secondStart + s + 0.03);
+          gain2.gain.setValueAtTime(0.025, now + secondStart + s + dur - 0.08);
+          gain2.gain.linearRampToValueAtTime(0, now + secondStart + s + dur);
+          osc2.start(now + secondStart + s);
+          osc2.stop(now + secondStart + s + dur + 0.01);
         });
       };
 
-      playTone();
-      intervalRef.current = setInterval(playTone, 2000);
+      playRing();
+      intervalRef.current = setInterval(playRing, 3000);
     } catch {
       // AudioContext not available
     }
