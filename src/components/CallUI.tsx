@@ -100,17 +100,48 @@ function VideoTile({
 
     const checkVideo = () => {
       const tracks = stream?.getVideoTracks() || [];
-      setHasVideo(tracks.length > 0 && tracks.some(t => t.readyState === "live"));
+      const active = tracks.length > 0 && tracks.some(t => t.readyState === "live" && t.enabled && !t.muted);
+      setHasVideo(active);
+      // Clear srcObject when no video so the last frame doesn't stick
+      if (!active && el) {
+        el.srcObject = null;
+      } else if (active && el && !el.srcObject && stream) {
+        el.srcObject = stream;
+        el.play().catch(() => {});
+      }
     };
     checkVideo();
 
+    // Listen on stream for track add/remove
+    const trackCleanups: (() => void)[] = [];
     if (stream) {
       stream.addEventListener("addtrack", checkVideo);
       stream.addEventListener("removetrack", checkVideo);
-      const interval = setInterval(checkVideo, 1000);
+
+      // Listen on each video track for mute/unmute/ended
+      const attachTrackListeners = () => {
+        trackCleanups.forEach((c) => c());
+        trackCleanups.length = 0;
+        stream.getVideoTracks().forEach((track) => {
+          track.addEventListener("mute", checkVideo);
+          track.addEventListener("unmute", checkVideo);
+          track.addEventListener("ended", checkVideo);
+          trackCleanups.push(() => {
+            track.removeEventListener("mute", checkVideo);
+            track.removeEventListener("unmute", checkVideo);
+            track.removeEventListener("ended", checkVideo);
+          });
+        });
+      };
+      attachTrackListeners();
+      stream.addEventListener("addtrack", attachTrackListeners);
+
+      const interval = setInterval(checkVideo, 500);
       return () => {
         stream.removeEventListener("addtrack", checkVideo);
         stream.removeEventListener("removetrack", checkVideo);
+        stream.removeEventListener("addtrack", attachTrackListeners);
+        trackCleanups.forEach((c) => c());
         clearInterval(interval);
       };
     }

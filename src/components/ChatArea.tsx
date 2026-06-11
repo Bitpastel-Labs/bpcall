@@ -142,7 +142,7 @@ export default function ChatArea({ roomId, roomName, chatUser, onStartCall, onFi
   const { messages, loading, sendMessage, sendTyping, sendError, connected } = useChat(roomId);
   const { subscribe } = useWebSocket();
   const [input, setInput] = useState("");
-  const [typingUsers, setTypingUsers] = useState<Set<number>>(new Set());
+  const [typingUsers, setTypingUsers] = useState<Map<number, string>>(new Map());
   const [showEmoji, setShowEmoji] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showRoomPanel, setShowRoomPanel] = useState(false);
@@ -252,10 +252,11 @@ export default function ChatArea({ roomId, roomName, chatUser, onStartCall, onFi
   useEffect(() => {
     return subscribe("typing", (payload) => {
       const userId = payload.user_id as number;
+      const userName = payload.user_name as string || "Someone";
       if (userId === user?.id) return;
       if ((payload.room_id as number) !== roomId) return;
 
-      setTypingUsers((prev) => new Set([...prev, userId]));
+      setTypingUsers((prev) => new Map(prev).set(userId, userName));
 
       const existing = typingTimeoutRef.current.get(userId);
       if (existing) clearTimeout(existing);
@@ -263,7 +264,7 @@ export default function ChatArea({ roomId, roomName, chatUser, onStartCall, onFi
         userId,
         setTimeout(() => {
           setTypingUsers((prev) => {
-            const next = new Set(prev);
+            const next = new Map(prev);
             next.delete(userId);
             return next;
           });
@@ -870,7 +871,14 @@ export default function ChatArea({ roomId, roomName, chatUser, onStartCall, onFi
               <div className="w-1 h-1 rounded-full bg-brand-400/50 animate-bounce" style={{ animationDelay: "150ms" }} />
               <div className="w-1 h-1 rounded-full bg-brand-400/50 animate-bounce" style={{ animationDelay: "300ms" }} />
             </div>
-            <p className="text-[11px] text-surface-200/30">Someone is typing</p>
+            <p className="text-[11px] text-surface-200/30">
+              {(() => {
+                const names = Array.from(typingUsers.values());
+                if (names.length === 1) return `${names[0]} is typing`;
+                if (names.length === 2) return `${names[0]} and ${names[1]} are typing`;
+                return `${names[0]}, ${names[1]} and ${names.length - 2} more are typing`;
+              })()}
+            </p>
           </div>
         </div>
       )}

@@ -300,8 +300,7 @@ export function useWebRTC() {
         }
       }),
 
-      subscribe("call_accept", (payload) => {
-        // Someone accepted our call — capture their name
+      subscribe("call_accept", async (payload) => {
         const acceptorName = payload.from_user_name as string | undefined;
         const acceptorId = payload.from_user_id as number | undefined;
         if (acceptorName) {
@@ -309,6 +308,30 @@ export function useWebRTC() {
         }
         if (acceptorId && acceptorName) {
           setRemoteNames((prev) => new Map(prev).set(acceptorId, acceptorName));
+        }
+
+        // In a group call, if we're already active and someone else joins,
+        // we need to create a peer connection with them too (mesh P2P)
+        if (callStateRef.current.active && acceptorId && localStreamRef.current) {
+          // Only if we don't already have a connection to this user
+          if (!peersRef.current.has(acceptorId)) {
+            try {
+              const pc = createPeerConnection(acceptorId, localStreamRef.current);
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              send({
+                type: "webrtc_offer",
+                payload: {
+                  target_user_id: acceptorId,
+                  sdp: offer.sdp,
+                  type: offer.type,
+                  room_id: callStateRef.current.roomId,
+                },
+              });
+            } catch (e) {
+              console.error("[WebRTC] Error connecting to new participant:", e);
+            }
+          }
         }
       }),
 
