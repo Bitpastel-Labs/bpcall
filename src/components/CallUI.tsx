@@ -369,16 +369,24 @@ export default function CallUI({
           </div>
         </div>
       ) : (
-        /* Group call — grid layout like Google Meet */
-        <div className="flex-1 min-h-0 p-4 flex items-center justify-center">
-          <div className="w-full h-full grid gap-3 auto-rows-fr" style={{
-            gridTemplateColumns: `repeat(${Math.min(remoteStreams.size + 1, 3)}, 1fr)`,
-          }}>
-            <VideoTile stream={localStream} muted={true} label="You" />
-            {Array.from(remoteStreams.entries()).map(([userId, stream]) => {
-              const name = remoteNames.get(userId) || remoteName;
-              return <VideoTile key={userId} stream={stream} muted={false} label={name} />;
-            })}
+        /* Group call — responsive grid */
+        <div className="flex-1 min-h-0 p-3 sm:p-4 overflow-auto">
+          <div className="w-full h-full grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-3">
+            {[
+              { stream: localStream, muted: true, label: "You", key: "self" },
+              ...Array.from(remoteStreams.entries()).map(([userId, s]) => ({
+                stream: s,
+                muted: false,
+                label: remoteNames.get(userId) || remoteName,
+                key: String(userId),
+              })),
+            ].map(({ stream: s, muted: m, label: l, key }) => (
+              <div key={key} className="relative aspect-video bg-surface-800 rounded-xl sm:rounded-2xl overflow-hidden">
+                <div className="absolute inset-0">
+                  <VideoTile stream={s} muted={m} label={l} size="full" />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

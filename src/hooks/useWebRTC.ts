@@ -359,6 +359,13 @@ export function useWebRTC() {
           return;
         }
 
+        // If we already have a working connection to this user, skip
+        const existingPc = peersRef.current.get(fromUserId);
+        if (existingPc && (existingPc.connectionState === "connected" || existingPc.connectionState === "connecting")) {
+          console.log("[WebRTC] Already connected/connecting to", fromUserId, "— skipping offer");
+          return;
+        }
+
         try {
           const pc = createPeerConnection(fromUserId, stream);
           await pc.setRemoteDescription(
