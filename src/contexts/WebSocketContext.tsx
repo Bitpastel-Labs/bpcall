@@ -56,7 +56,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     // Clean up any existing connection first
     cleanup();
 
-    const wsUrl = `${process.env.NEXT_PUBLIC_WS_URL}/ws?token=${token}`;
+    // Derive WebSocket URL from API URL (https→wss, http→ws)
+    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+    const wsBase = apiUrl.replace(/^http/, "ws");
+    const wsUrl = `${wsBase}/ws?token=${token}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

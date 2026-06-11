@@ -1,6 +1,6 @@
 import type { TokenResponse, User, Connection, RoomListItem, Room, Message, CallLog } from "@/types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
 let accessToken: string | null = null;
 
